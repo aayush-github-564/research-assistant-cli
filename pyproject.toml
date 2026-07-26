@@ -1,7 +1,7 @@
 [project]
 name = "research-assistant-cli"
 version = "0.1.0"
-description = "Add your description here"
+description = "RAG agent system in miniature which searches, fetches sources, stores them locally, and eventually lets you semantically query your accumulated research and get LLM-summarized answers."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

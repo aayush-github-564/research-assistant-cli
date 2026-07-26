@@ -9,3 +9,8 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+#Windows OS files
+Thumbs.db
+# macOS files
+.DS_Store
