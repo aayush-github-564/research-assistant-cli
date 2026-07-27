@@ -5,9 +5,11 @@ description = "RAG agent system in miniature which searches, fetches sources, st
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "duckduckgo-search>=8.1.1",
     "ipykernel>=7.3.0",
     "numpy>=2.5.1",
     "pandas>=3.0.3",
     "python-dotenv>=1.2.2",
     "requests>=2.34.2",
+    "tavily-python>=0.7.26",
 ]
