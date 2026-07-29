@@ -1,9 +1,6 @@
-import os
 import sys
-from dotenv import load_dotenv
-from tavily import TavilyClient
 
-load_dotenv()
+from providers import TavilySearchProvider
 
 
 def main():
@@ -13,20 +10,13 @@ def main():
 
     query = sys.argv[1]
 
-    api_key = os.getenv("TAVILY_API_KEY")
-    if not api_key:
-        print("Missing TAVILY_API_KEY. Check your .env file.")
-        sys.exit(1)
-
-    client = TavilyClient(api_key=api_key)
+    provider = TavilySearchProvider()  # swap this to change provider
 
     try:
-        response = client.search(query, max_results=5)
+        results = provider.search(query, max_results=5)
     except Exception as e:
         print(f"Search failed: {e}")
         sys.exit(1)
-
-    results = response.get("results", [])
 
     if not results:
         print(f"No results found for '{query}'.")
@@ -34,13 +24,7 @@ def main():
 
     print(f"\nResults for: {query}\n{'-' * 40}")
     for i, result in enumerate(results, start=1):
-        title = result.get("title", "No title")
-        url = result.get("url", "No URL")
-        snippet = result.get("content", "No description")
-
-        print(f"{i}. {title}")
-        print(f"   {url}")
-        print(f"   {snippet}\n")
+        print(f"{i}. {result}")
 
 
 if __name__ == "__main__":
