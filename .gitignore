@@ -14,3 +14,5 @@ wheels/
 Thumbs.db
 # macOS files
 .DS_Store
+#database files
+research.db

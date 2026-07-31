@@ -1,9 +1,21 @@
 import sys
 
+from database import Database
 from providers import TavilySearchProvider
 
 
 def main():
+    db = Database()
+
+    if len(sys.argv) >= 2 and sys.argv[1] == "--history":
+        recent = db.get_recent_searches(limit=5)
+        if not recent:
+            print("No past searches yet.")
+        for s in recent:
+            print(f"#{s['id']}  {s['query']}  ({s['created_at']})")
+        db.close()
+        return
+
     if len(sys.argv) < 2:
         print('Usage: uv run python main.py "your search query"')
         sys.exit(1)
@@ -19,12 +31,16 @@ def main():
         sys.exit(1)
 
     if not results:
-        print(f"No results found for '{query}'.")
+        print(f"No      results found for '{query}'.")
         sys.exit(0)
 
-    print(f"\nResults for: {query}\n{'-' * 40}")
+    search_id = db.save_search(query, results)
+
+    print(f"\nResults for: {query}  (saved as search #{search_id})\n{'-' * 40}")
     for i, result in enumerate(results, start=1):
         print(f"{i}. {result}")
+
+    db.close()
 
 
 if __name__ == "__main__":
