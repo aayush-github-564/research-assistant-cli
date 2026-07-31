@@ -16,6 +16,26 @@ def main():
         db.close()
         return
 
+    if len(sys.argv) >= 3 and sys.argv[1] == "--show":
+        search_id = int(sys.argv[2])
+        results = db.get_results_for_search(search_id)
+        if not results:
+            print(f"No results found for search #{search_id}.")
+        for i, r in enumerate(results, start=1):
+            print(f"{i}. {r}")
+        db.close()
+        return
+
+    if len(sys.argv) >= 3 and sys.argv[1] == "--find":
+        keyword = sys.argv[2]
+        matches = db.search_history(keyword)
+        if not matches:
+            print(f"No past searches matching '{keyword}'.")
+        for s in matches:
+            print(f"#{s['id']}  {s['query']}  ({s['created_at']})")
+        db.close()
+        return
+
     if len(sys.argv) < 2:
         print('Usage: uv run python main.py "your search query"')
         sys.exit(1)
