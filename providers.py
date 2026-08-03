@@ -2,10 +2,13 @@ import asyncio
 import os
 from abc import ABC, abstractmethod
 
+import requests
 from duckduckgo_search import DDGS
 from tavily import TavilyClient
 
 from models import SearchResult
+from resilience import retry_with_backoff
+from cache import cached_search
 
 
 class SearchProvider(ABC):
@@ -26,6 +29,8 @@ async def search_multiple(providers: list[SearchProvider], query: str) -> dict:
 
 
 class DuckDuckGoSearchProvider(SearchProvider):
+    @cached_search()
+    @retry_with_backoff(max_attempts=3, retry_on=(Exception,))
     def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
         raw_results = DDGS(timeout=10).text(query, max_results=max_results)
 
@@ -46,6 +51,10 @@ class TavilySearchProvider(SearchProvider):
             raise ValueError("Missing TAVILY_API_KEY. Check your .env file.")
         self.client = TavilyClient(api_key=api_key)
 
+    @cached_search()
+    @retry_with_backoff(
+        max_attempts=3, retry_on=(requests.exceptions.RequestException,)
+    )
     def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
         response = self.client.search(query, max_results=max_results, timeout=10)
         raw_results = response.get("results", [])

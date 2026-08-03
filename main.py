@@ -12,8 +12,8 @@ shutdown_event = threading.Event()
 logger = setup_logging()
 
 
-async def run_search(query):
-    providers = [TavilySearchProvider(), DuckDuckGoSearchProvider()]
+async def run_search(query, db):
+    providers = [TavilySearchProvider(db), DuckDuckGoSearchProvider(db)]
     return await search_multiple(providers, query)
 
 
@@ -62,7 +62,7 @@ def main():
 
     query = sys.argv[1]
 
-    provider = TavilySearchProvider()  # swap this to change provider
+    provider = TavilySearchProvider(db)  # swap this to change provider
 
     try:
         results = provider.search(query, max_results=5)

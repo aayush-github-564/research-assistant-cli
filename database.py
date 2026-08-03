@@ -1,7 +1,9 @@
+from datetime import UTC, datetime
+import json
+from pathlib import Path
 import sqlite3
 import threading
-from datetime import UTC, datetime
-from pathlib import Path
+import time
 
 from models import SearchResult
 from paths import get_db_path
@@ -34,6 +36,43 @@ class Database:
                 FOREIGN KEY (search_id) REFERENCES searches(id)
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS search_cache (
+                cache_key TEXT PRIMARY KEY,
+                results_json TEXT NOT NULL,
+                created_at REAL NOT NULL
+            )
+        """)
+        self.connection.commit()
+
+    def get_cached_result(
+        self, cache_key: str, ttl_seconds: int
+    ) -> list[SearchResult] | None:
+        """Returns cached results if present and still within TTL, else None."""
+        cursor = self.connection.cursor()
+        cursor.execute(
+            "SELECT results_json, created_at FROM search_cache WHERE cache_key = ?",
+            (cache_key,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+
+        results_json, created_at = row
+        if time.time() - created_at >= ttl_seconds:
+            return None  # expired — treat as a miss
+
+        raw_list = json.loads(results_json)
+        return [SearchResult(**r) for r in raw_list]
+
+    def set_cached_result(self, cache_key: str, results: list[SearchResult]) -> None:
+        """Stores (or overwrites) a cache entry for the given key."""
+        cursor = self.connection.cursor()
+        results_json = json.dumps([r.__dict__ for r in results])
+        cursor.execute(
+            "INSERT OR REPLACE INTO search_cache (cache_key, results_json, created_at) VALUES (?, ?, ?)",
+            (cache_key, results_json, time.time()),
+        )
         self.connection.commit()
 
     def save_search(self, query: str, results: list[SearchResult]) -> int:
