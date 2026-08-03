@@ -1,11 +1,31 @@
+import signal
 import sys
+import threading
+
+import requests
 
 from database import Database
-from providers import TavilySearchProvider
+from logger import setup_logging
+from providers import DuckDuckGoSearchProvider, TavilySearchProvider, search_multiple
+
+shutdown_event = threading.Event()
+logger = setup_logging()
+
+
+async def run_search(query):
+    providers = [TavilySearchProvider(), DuckDuckGoSearchProvider()]
+    return await search_multiple(providers, query)
+
+
+def handle_sigint(signum, frame):
+    print("\nInterrupt received — finishing safely...")
+    shutdown_event.set()
 
 
 def main():
-    db = Database()
+    signal.signal(signal.SIGINT, handle_sigint)
+
+    db = Database(shutdown_event)
 
     if len(sys.argv) >= 2 and sys.argv[1] == "--history":
         recent = db.get_recent_searches(limit=5)
@@ -46,12 +66,12 @@ def main():
 
     try:
         results = provider.search(query, max_results=5)
-    except Exception as e:
-        print(f"Search failed: {e}")
+    except (requests.exceptions.RequestException, ValueError) as e:
+        logger.error(f"Search failed: {e}")
         sys.exit(1)
 
     if not results:
-        print(f"No      results found for '{query}'.")
+        print(f"No results found for '{query}'.")
         sys.exit(0)
 
     search_id = db.save_search(query, results)

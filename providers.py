@@ -1,3 +1,4 @@
+import asyncio
 import os
 from abc import ABC, abstractmethod
 
@@ -16,9 +17,17 @@ class SearchProvider(ABC):
         raise NotImplementedError
 
 
+async def search_multiple(providers: list[SearchProvider], query: str) -> dict:
+    """Runs .search() for each provider concurrently."""
+    loop = asyncio.get_event_loop()
+    tasks = [loop.run_in_executor(None, p.search, query) for p in providers]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return dict(zip([type(p).__name__ for p in providers], results))
+
+
 class DuckDuckGoSearchProvider(SearchProvider):
     def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
-        raw_results = DDGS().text(query, max_results=max_results)
+        raw_results = DDGS(timeout=10).text(query, max_results=max_results)
 
         return [
             SearchResult(
@@ -38,7 +47,7 @@ class TavilySearchProvider(SearchProvider):
         self.client = TavilyClient(api_key=api_key)
 
     def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
-        response = self.client.search(query, max_results=max_results)
+        response = self.client.search(query, max_results=max_results, timeout=10)
         raw_results = response.get("results", [])
 
         return [

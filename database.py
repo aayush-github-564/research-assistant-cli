@@ -1,14 +1,18 @@
 import sqlite3
-from datetime import datetime, timezone
+import threading
+from datetime import UTC, datetime
+from pathlib import Path
 
 from models import SearchResult
+from paths import get_db_path
 
 DB_PATH = "research.db"
 
 
 class Database:
-    def __init__(self, db_path: str = DB_PATH):
-        self.connection = sqlite3.connect(db_path)
+    def __init__(self, shutdown_event: threading.Event, db_path: Path | None = None):
+        self.connection = sqlite3.connect(db_path or get_db_path())
+        self.shutdown_event = shutdown_event
         self._create_tables()
 
     def _create_tables(self):
@@ -39,11 +43,16 @@ class Database:
         try:
             cursor.execute(
                 "INSERT INTO searches (query, created_at) VALUES (?, ?)",
-                (query, datetime.now(timezone.utc).isoformat()),
+                (query, datetime.now(UTC).isoformat()),
             )
             search_id = cursor.lastrowid
 
             for r in results:
+                if self.shutdown_event.is_set():
+                    self.connection.rollback()
+                    print("Shutdown requested mid-save — rolled back cleanly.")
+                    raise SystemExit(0)
+
                 cursor.execute(
                     "INSERT INTO results (search_id, title, url, snippet) VALUES (?, ?, ?, ?)",
                     (search_id, r.title, r.url, r.snippet),
