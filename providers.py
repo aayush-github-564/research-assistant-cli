@@ -9,6 +9,10 @@ from tavily import TavilyClient
 from models import SearchResult
 from resilience import retry_with_backoff
 from cache import cached_search
+from logger import setup_logging
+
+
+logger = setup_logging()
 
 
 class SearchProvider(ABC):
@@ -20,15 +24,35 @@ class SearchProvider(ABC):
         raise NotImplementedError
 
 
-async def search_multiple(providers: list[SearchProvider], query: str) -> dict:
-    """Runs .search() for each provider concurrently."""
+async def search_multiple(
+    providers: list[SearchProvider], query: str
+) -> list[SearchResult]:
+    """Runs .search() for each provider concurrently, merges results,
+    and dedups by URL (first occurrence wins)."""
     loop = asyncio.get_event_loop()
     tasks = [loop.run_in_executor(None, p.search, query) for p in providers]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    return dict(zip([type(p).__name__ for p in providers], results))
+    provider_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    merged: list[SearchResult] = []
+    seen_urls: set[str] = set()
+
+    for provider, result in zip(providers, provider_results):
+        if isinstance(result, Exception):
+            logger.warning(f"{type(provider).__name__} failed: {result}")
+            continue
+
+        for r in result:
+            if r.url not in seen_urls:
+                seen_urls.add(r.url)
+                merged.append(r)
+
+    return merged
 
 
 class DuckDuckGoSearchProvider(SearchProvider):
+    def __init__(self, db):
+        self.db = db
+
     @cached_search()
     @retry_with_backoff(max_attempts=3, retry_on=(Exception,))
     def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
@@ -45,11 +69,12 @@ class DuckDuckGoSearchProvider(SearchProvider):
 
 
 class TavilySearchProvider(SearchProvider):
-    def __init__(self):
+    def __init__(self, db):
         api_key = os.getenv("TAVILY_API_KEY")
         if not api_key:
             raise ValueError("Missing TAVILY_API_KEY. Check your .env file.")
         self.client = TavilyClient(api_key=api_key)
+        self.db = db
 
     @cached_search()
     @retry_with_backoff(
