@@ -3,7 +3,8 @@ import os
 from abc import ABC, abstractmethod
 
 import requests
-from duckduckgo_search import DDGS
+from ddgs import DDGS
+from ddgs.exceptions import DDGSException
 from tavily import TavilyClient
 
 from models import SearchResult
@@ -28,7 +29,15 @@ async def search_multiple(
     providers: list[SearchProvider], query: str
 ) -> list[SearchResult]:
     """Runs .search() for each provider concurrently, merges results,
-    and dedups by URL (first occurrence wins)."""
+    and dedups by URL (first occurrence wins).
+
+    NOTE: each provider's .search() runs in a separate worker thread
+    (via run_in_executor). All providers share one Database instance
+    for caching — Database now uses check_same_thread=False plus an
+    internal lock, specifically to make this safe. If you ever swap
+    Database for something else, that thread-safety requirement goes
+    with it.
+    """
     loop = asyncio.get_event_loop()
     tasks = [loop.run_in_executor(None, p.search, query) for p in providers]
     provider_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -53,8 +62,18 @@ class DuckDuckGoSearchProvider(SearchProvider):
     def __init__(self, db):
         self.db = db
 
+    # Narrowed from (Exception,) to the actual transient failure types:
+    # DDGSException covers the library's own network/rate-limit errors
+    # (duckduckgo_search was renamed to ddgs upstream; DDGSException
+    # replaces the old DuckDuckGoSearchException), and requests exceptions
+    # cover the underlying HTTP layer. A bug in our own code (e.g.
+    # AttributeError from a bad self.db) will now surface immediately
+    # instead of being silently retried 3 times.
     @cached_search()
-    @retry_with_backoff(max_attempts=3, retry_on=(Exception,))
+    @retry_with_backoff(
+        max_attempts=3,
+        retry_on=(DDGSException, requests.exceptions.RequestException),
+    )
     def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
         raw_results = DDGS(timeout=10).text(query, max_results=max_results)
 
