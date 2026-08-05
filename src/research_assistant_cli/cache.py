@@ -2,7 +2,7 @@ import functools
 import hashlib
 import json
 
-from logger import setup_logging
+from .logger import setup_logging
 
 logger = setup_logging()
 

@@ -5,9 +5,9 @@ import threading
 
 import requests
 
-from database import Database
-from logger import setup_logging
-from providers import DuckDuckGoSearchProvider, TavilySearchProvider, search_multiple
+from .database import Database
+from .logger import setup_logging
+from .providers import DuckDuckGoSearchProvider, TavilySearchProvider, search_multiple
 
 shutdown_event = threading.Event()
 logger = setup_logging()
@@ -105,5 +105,13 @@ async def main():
         db.close()
 
 
-if __name__ == "__main__":
+def cli():
+    """Sync entry point for the installed console script.
+    console-script entry points call a plain sync callable with no args —
+    they don't know how to await a coroutine, so this wraps the real
+    async main() in asyncio.run(), exactly like the __main__ block did."""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    cli()

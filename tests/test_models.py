@@ -1,4 +1,4 @@
-from models import SearchResult
+from research_assistant_cli.models import SearchResult
 
 
 def test_search_result_equality():

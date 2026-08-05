@@ -7,10 +7,10 @@ from ddgs import DDGS
 from ddgs.exceptions import DDGSException
 from tavily import TavilyClient
 
-from models import SearchResult
-from resilience import retry_with_backoff
-from cache import cached_search
-from logger import setup_logging
+from .cache import cached_search
+from .logger import setup_logging
+from .models import SearchResult
+from .resilience import retry_with_backoff
 
 
 logger = setup_logging()

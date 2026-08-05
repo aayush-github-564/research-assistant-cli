@@ -3,8 +3,8 @@ import time
 
 import pytest
 
-from database import Database
-from models import SearchResult
+from research_assistant_cli.database import Database
+from research_assistant_cli.models import SearchResult
 
 
 @pytest.fixture
@@ -91,7 +91,9 @@ def test_cache_expired_returns_none(db, monkeypatch):
 
     # simulate time passing well beyond the TTL
     real_time = time.time
-    monkeypatch.setattr("database.time.time", lambda: real_time() + 3600)
+    monkeypatch.setattr(
+        "research_assistant_cli.database.time.time", lambda: real_time() + 3600
+    )
 
     cached = db.get_cached_result("some-key", ttl_seconds=60)
 

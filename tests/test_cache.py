@@ -1,7 +1,7 @@
 import pytest
 
-from cache import cached_search, make_cache_key
-from models import SearchResult
+from research_assistant_cli.cache import cached_search, make_cache_key
+from research_assistant_cli.models import SearchResult
 
 
 def test_make_cache_key_is_deterministic():
