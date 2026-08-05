@@ -6,7 +6,7 @@ from .logger import setup_logging
 
 logger = setup_logging()
 
-DEFAULT_CACHE_TTL = 5  # 1 hour
+DEFAULT_CACHE_TTL = 3600  # 1 hour
 
 
 def make_cache_key(provider_name: str, query: str, max_results: int) -> str:
