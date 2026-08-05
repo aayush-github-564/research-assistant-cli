@@ -1,6 +1,6 @@
 import logging
 
-from paths import get_data_dir
+from .paths import get_data_dir
 
 
 def setup_logging():

@@ -1,12 +1,12 @@
-from datetime import UTC, datetime
 import json
-from pathlib import Path
 import sqlite3
 import threading
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 
-from models import SearchResult
-from paths import get_db_path
+from .models import SearchResult
+from .paths import get_db_path
 
 DB_PATH = "research.db"
 

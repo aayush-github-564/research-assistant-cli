@@ -2,7 +2,7 @@ import threading
 
 import pytest
 
-from database import Database
+from research_assistant_cli.database import Database
 
 
 @pytest.fixture

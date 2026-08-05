@@ -1,5 +1,6 @@
-from resilience import retry_with_backoff
 import pytest
+
+from research_assistant_cli.resilience import retry_with_backoff
 
 
 def test_succeeds_on_first_try():
@@ -18,7 +19,7 @@ def test_succeeds_on_first_try():
 
 
 def test_succeeds_after_transient_failures(monkeypatch):
-    monkeypatch.setattr("resilience.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("research_assistant_cli.resilience.time.sleep", lambda seconds: None)
 
     call_count = 0
 
@@ -37,7 +38,7 @@ def test_succeeds_after_transient_failures(monkeypatch):
 
 
 def test_raises_after_max_attempts(monkeypatch):
-    monkeypatch.setattr("resilience.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("research_assistant_cli.resilience.time.sleep", lambda seconds: None)
 
     call_count = 0
 
@@ -54,7 +55,7 @@ def test_raises_after_max_attempts(monkeypatch):
 
 
 def test_does_not_retry_non_matching_exception(monkeypatch):
-    monkeypatch.setattr("resilience.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("research_assistant_cli.resilience.time.sleep", lambda seconds: None)
 
     call_count = 0
 

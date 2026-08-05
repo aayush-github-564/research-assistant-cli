@@ -1,13 +1,13 @@
 import pytest
 from ddgs.exceptions import DDGSException
 
-from providers import (
+from research_assistant_cli.providers import (
     DuckDuckGoSearchProvider,
     TavilySearchProvider,
     SearchProvider,
     search_multiple,
 )
-from models import SearchResult
+from research_assistant_cli.models import SearchResult
 
 
 class FakeDDGS:
@@ -49,7 +49,7 @@ class FakeTavilyClient:
 
 
 def test_duckduckgo_search_success(monkeypatch, db):
-    monkeypatch.setattr("providers.DDGS", FakeDDGS)
+    monkeypatch.setattr("research_assistant_cli.providers.DDGS", FakeDDGS)
 
     provider = DuckDuckGoSearchProvider(db=db)
     results = provider.search("python decorators")
@@ -60,7 +60,7 @@ def test_duckduckgo_search_success(monkeypatch, db):
 
 
 def test_duckduckgo_search_missing_fields_uses_defaults(monkeypatch, db):
-    monkeypatch.setattr("providers.DDGS", FakeDDGSMissingFields)
+    monkeypatch.setattr("research_assistant_cli.providers.DDGS", FakeDDGSMissingFields)
 
     provider = DuckDuckGoSearchProvider(db=db)
     results = provider.search("obscure query")
@@ -71,8 +71,10 @@ def test_duckduckgo_search_missing_fields_uses_defaults(monkeypatch, db):
 
 
 def test_duckduckgo_search_raises_after_retries_exhausted(monkeypatch, db):
-    monkeypatch.setattr("providers.DDGS", FakeDDGSRaises)
-    monkeypatch.setattr("resilience.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("research_assistant_cli.providers.DDGS", FakeDDGSRaises)
+    monkeypatch.setattr(
+        "research_assistant_cli.resilience.time.sleep", lambda seconds: None
+    )
 
     provider = DuckDuckGoSearchProvider(db=db)
 
@@ -82,7 +84,9 @@ def test_duckduckgo_search_raises_after_retries_exhausted(monkeypatch, db):
 
 def test_tavily_search_success(monkeypatch, db):
     monkeypatch.setenv("TAVILY_API_KEY", "fake-key-for-testing")
-    monkeypatch.setattr("providers.TavilyClient", FakeTavilyClient)
+    monkeypatch.setattr(
+        "research_assistant_cli.providers.TavilyClient", FakeTavilyClient
+    )
 
     provider = TavilySearchProvider(db=db)
     results = provider.search("python decorators")
