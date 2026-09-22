@@ -2,6 +2,7 @@ import json
 import sqlite3
 import threading
 import time
+import numpy as np
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -52,6 +53,17 @@ class Database:
                 cache_key TEXT PRIMARY KEY,
                 results_json TEXT NOT NULL,
                 created_at REAL NOT NULL
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS chunks (
+                id INTEGER PRIMARY KEY,
+                result_id INTEGER NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                chunk_text TEXT NOT NULL,
+                embedding BLOB NOT NULL,
+                embedding_model TEXT NOT NULL,
+                FOREIGN KEY (result_id) REFERENCES results(id)
             )
         """)
         self.connection.commit()
@@ -118,6 +130,61 @@ class Database:
                 self.connection.rollback()
                 raise
 
+    def save_chunks(
+        self,
+        result_id: int,
+        chunks: list[str],
+        embeddings: list[np.ndarray],
+        embedding_model: str,
+    ) -> None:
+        """Saves a result's chunks and their embeddings as ONE transaction.
+        Mirrors save_search's shutdown-safety: a SIGINT mid-loop rolls back
+        cleanly instead of leaving a result with half its chunks embedded."""
+        with self._lock:
+            cursor = self.connection.cursor()
+            try:
+                for i, (text, embedding) in enumerate(zip(chunks, embeddings)):
+                    if self.shutdown_event.is_set():
+                        self.connection.rollback()
+                        print("Shutdown requested mid-save — rolled back cleanly.")
+                        raise SystemExit(0)
+
+                    cursor.execute(
+                        "INSERT INTO chunks (result_id, chunk_index, chunk_text, embedding, embedding_model) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (result_id, i, text, embedding.astype(np.float32).tobytes(), embedding_model),
+                    )
+                self.connection.commit()
+            except sqlite3.Error:
+                self.connection.rollback()
+                raise
+
+    def get_all_chunks(self) -> list[dict]:
+        """Returns every stored chunk with its embedding unpacked back to
+        a numpy array, plus enough context (title, url, query) to cite a
+        source when the LLM synthesizes an answer."""
+        with self._lock:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT c.chunk_text, c.embedding, c.embedding_model,
+                       r.title, r.url, s.query
+                FROM chunks c
+                JOIN results r ON c.result_id = r.id
+                JOIN searches s ON r.search_id = s.id
+            """)
+            rows = cursor.fetchall()
+            return [
+                {
+                    "chunk_text": row[0],
+                    "embedding": np.frombuffer(row[1], dtype=np.float32),
+                    "embedding_model": row[2],
+                    "title": row[3],
+                    "url": row[4],
+                    "query": row[5],
+                }
+                for row in rows
+            ]
+            
     def get_recent_searches(self, limit: int = 5) -> list[dict]:
         """Returns the last N searches, most recent first."""
         with self._lock:
@@ -139,6 +206,18 @@ class Database:
             )
             rows = cursor.fetchall()
             return [SearchResult(title=r[0], url=r[1], snippet=r[2]) for r in rows]
+
+    def get_result_ids_for_search(self, search_id: int) -> list[int]:
+        """Returns the DB ids of a search's results, in insertion order —
+        the same order as the results list passed to save_search. Used
+        to attach embedded chunks back to the right result via FK."""
+        with self._lock:
+            cursor = self.connection.cursor()
+            cursor.execute(
+                "SELECT id FROM results WHERE search_id = ? ORDER BY id",
+                (search_id,),
+            )
+            return [row[0] for row in cursor.fetchall()]
 
     def search_history(self, keyword: str) -> list[dict]:
         """Finds past searches whose query text matches a keyword."""

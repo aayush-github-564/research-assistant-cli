@@ -5,13 +5,17 @@ description = "RAG agent system in miniature which searches, fetches sources, st
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "anthropic>=1.7.0",
+    "cohere>=7.1.1",
     "ddgs>=9.14.4",
+    "google-genai>=2.24.0",
     "ipykernel>=7.3.0",
     "numpy>=2.5.1",
     "pandas>=3.0.3",
     "python-dotenv>=1.2.2",
     "requests>=2.34.2",
     "tavily-python>=0.7.26",
+    "trafilatura>=2.2.0",
 ]
 
 [project.scripts]

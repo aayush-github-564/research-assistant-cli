@@ -2,6 +2,7 @@ import threading
 import time
 
 import pytest
+import numpy as np
 
 from research_assistant_cli.database import Database
 from research_assistant_cli.models import SearchResult
@@ -98,3 +99,48 @@ def test_cache_expired_returns_none(db, monkeypatch):
     cached = db.get_cached_result("some-key", ttl_seconds=60)
 
     assert cached is None
+
+def test_save_and_get_result_ids_for_search(db):
+    results = [
+        SearchResult(title="A", url="https://a.com", snippet="snippet a"),
+        SearchResult(title="B", url="https://b.com", snippet="snippet b"),
+    ]
+    search_id = db.save_search("test query", results)
+
+    result_ids = db.get_result_ids_for_search(search_id)
+
+    assert len(result_ids) == 2
+
+
+def test_save_chunks_and_get_all_chunks_roundtrip(db):
+    results = [SearchResult(title="A", url="https://a.com", snippet="snippet a")]
+    search_id = db.save_search("test query", results)
+    result_id = db.get_result_ids_for_search(search_id)[0]
+
+    embedding = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+    db.save_chunks(result_id, ["chunk one"], [embedding], "fake-model")
+
+    all_chunks = db.get_all_chunks()
+
+    assert len(all_chunks) == 1
+    stored = all_chunks[0]
+    assert stored["chunk_text"] == "chunk one"
+    assert stored["embedding_model"] == "fake-model"
+    assert stored["title"] == "A"
+    assert stored["url"] == "https://a.com"
+    assert stored["query"] == "test query"
+    np.testing.assert_array_almost_equal(stored["embedding"], embedding)
+
+
+def test_save_chunks_rolls_back_on_shutdown(db):
+    results = [SearchResult(title="A", url="https://a.com", snippet="snippet a")]
+    search_id = db.save_search("test query", results)
+    result_id = db.get_result_ids_for_search(search_id)[0]
+
+    db.shutdown_event.set()
+    embedding = np.zeros(3, dtype=np.float32)
+
+    with pytest.raises(SystemExit):
+        db.save_chunks(result_id, ["c1", "c2"], [embedding, embedding], "fake-model")
+
+    assert db.get_all_chunks() == []

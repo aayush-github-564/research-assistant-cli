@@ -8,6 +8,14 @@ import requests
 from .database import Database
 from .logger import setup_logging
 from .providers import DuckDuckGoSearchProvider, TavilySearchProvider, search_multiple
+from .embeddings import get_embedding_provider
+from .ingestion import embed_and_store_results
+from .embeddings import get_embedding_provider
+from .retrieval import retrieve_relevant_chunks
+from .synthesis import synthesize_answer
+from dotenv import load_dotenv
+
+load_dotenv()
 
 shutdown_event = threading.Event()
 logger = setup_logging()
@@ -70,6 +78,49 @@ async def main():
                 print(f"#{s['id']}  {s['query']}  ({s['created_at']})")
             return
 
+        if len(sys.argv) >= 3 and sys.argv[1] == "--ask":
+            question = sys.argv[2]
+
+            try:
+                provider = get_embedding_provider()
+            except ValueError as e:
+                print(f"Can't answer — {e}")
+                return
+
+            # Always searches first — same config-error-vs-network-failure
+            # split as the main search path above — so --ask can answer
+            # questions on topics never searched before, not just what's
+            # already sitting in the corpus.
+            try:
+                results = await run_search(question, db)
+            except (requests.exceptions.RequestException, ValueError) as e:
+                logger.warning(f"Fresh search for --ask failed, falling back to existing corpus: {e}")
+                results = []
+
+            if results:
+                search_id = db.save_search(question, results)
+                print(f"Searched for: {question}  (saved as search #{search_id})\n")
+                try:
+                    embed_and_store_results(db, provider, search_id, results)
+                except Exception as e:
+                    logger.warning(f"Embedding failed — results saved, but not indexed: {e}")
+
+            chunks = retrieve_relevant_chunks(db, provider, question)
+            if not chunks:
+                print("Nothing relevant found — even after a fresh search.")
+                return
+
+            try:
+                answer = synthesize_answer(question, chunks)
+            except ValueError as e:
+                print(f"Can't answer — {e}")
+                return
+
+            print(f"\n{answer}\n\nSources:")
+            for c in chunks:
+                print(f"- {c['title']} ({c['url']})")
+            return
+        
         if len(sys.argv) < 2:
             print('Usage: uv run python main.py "your search query"')
             sys.exit(1)
@@ -98,6 +149,12 @@ async def main():
         print(f"\nResults for: {query}  (saved as search #{search_id})\n{'-' * 40}")
         for i, result in enumerate(results, start=1):
             print(f"{i}. {result}")
+
+        try:
+            provider = get_embedding_provider()
+            embed_and_store_results(db, provider, search_id, results)
+        except Exception as e:
+            logger.warning(f"Embedding failed — results saved, but not indexed for --ask: {e}")
 
     finally:
         # Guarantees the connection is closed on every exit path —
