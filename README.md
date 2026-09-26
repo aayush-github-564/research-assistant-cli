@@ -1,107 +1,247 @@
-# Research Assistant CLI
+# AI-Powered Research Assistant CLI
 
-A command-line research tool that searches the web across multiple providers, caches results locally, and stores accumulated research for later retrieval — built as a from-scratch Python learning project, architected like production software rather than a script.
+> A Python-based research assistant that combines multi-provider web search, local research storage, semantic retrieval, embeddings, and LLM-based synthesis into an end-to-end RAG pipeline.
 
-Phase 8 (semantic query + LLM-summarized answers over stored research — effectively a RAG agent in miniature) is intentionally deferred and in progress.
+[![Python](https://img.shields.io/badge/Python-3.13-blue)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/tests-56%20passing-brightgreen)](#testing)
+[![RAG](https://img.shields.io/badge/AI-RAG-purple)](#rag-pipeline)
+[![License](https://img.shields.io/badge/license-MIT-green)](#license)
+<!-- Add a CI badge once you have the workflow filename, e.g.:
+![CI](https://github.com/aayush-github-564/research-assistant-cli/actions/workflows/<workflow-file>.yml/badge.svg) -->
 
-## Features
+---
 
-- **Multi-provider web search** with automatic fallback — queries DuckDuckGo and Tavily concurrently, merges and deduplicates results by URL, and degrades gracefully on partial provider failure
-- **Resilient by design** — retry-with-backoff wraps all network calls; a single failing provider or a cache read/write error never crashes a search
-- **Local caching** via SQLite, with TTL-based expiry to avoid redundant network calls on repeated queries
-- **Thread-safe persistence layer** — a dedicated DAL over `sqlite3` with `check_same_thread=False` and an explicit `threading.Lock()` for concurrent access
-- **Search history** — every query and its results are stored locally and retrievable later (`--history`, `--find`)
-- **Structured logging** to both console and a persistent `app.log` file
-- **32 tests, 99% code coverage** across resilience, database, cache, provider, and path-resolution layers, using fakes over mocks for explicit, low-brittleness provider tests
-- **Packaged as an installable CLI** via a `pyproject.toml` entry point — `uv tool install .` and run `research-assistant` directly
+## Overview
 
-## Tech Stack
+Research Assistant CLI is an end-to-end AI research system built from scratch in Python — no LangChain, no managed vector database. It began as a resilient multi-provider search CLI and evolved into a full retrieval-augmented generation (RAG) system:
 
-- **Language:** Python 3.13
-- **Package/dependency management:** `uv`
-- **Persistence:** SQLite (stdlib `sqlite3`)
-- **Search providers:** `ddgs`, `tavily-python`
-- **HTTP:** `requests`
-- **Data handling:** `numpy`, `pandas`
-- **Testing:** `pytest`, `monkeypatch`, `tmp_path`, shared `conftest.py` fixtures
-- **CI/CD:** GitHub Actions
-- **Packaging:** `pyproject.toml` entry point (`hatchling` build backend, `src/` layout)
+- Searches multiple web providers concurrently (DuckDuckGo, Tavily) and persists results locally in SQLite
+- Fetches and extracts full page content, chunks it for retrieval
+- Generates embeddings through interchangeable providers (Cohere, Gemini)
+- Retrieves relevant context via cosine similarity, with no ANN index or vector DB
+- Synthesizes grounded, cited answers with Claude
 
-## Architecture
+Core retrieval, persistence, provider abstraction, ingestion, and synthesis are implemented directly rather than delegated to a framework, to keep the AI pipeline explicit and inspectable end to end.
 
-```
-src/research_assistant_cli/
-├── main.py           # entry point, sys.argv parsing, command dispatch, sync/async bridge
-├── providers.py       # search provider clients (DDG, Tavily) + concurrent multi-provider merge/dedup
-├── resilience.py       # retry/backoff decorator used across all network calls
-├── cache.py             # @cached_search decorator — cache-key hashing, isolated read/write failure handling
-├── database.py            # SQLite DAL — cache table, search/results tables, thread-safe connection handling
-├── models.py               # SearchResult dataclass
-├── paths.py                 # OS-appropriate data directory resolution (Windows/macOS/Linux)
-└── logger.py                 # logging setup (console + app.log file handler)
-```
-
-**Design decisions worth knowing:**
-- **SQLite over Postgres** — single-user local CLI tool; zero-setup persistence was the right tradeoff over running a database server for a research assistant that lives on one machine.
-- **Retry/backoff at the provider boundary, not the CLI boundary** — network flakiness is isolated to where it originates, so a transient DNS blip on one provider doesn't bubble up as a user-facing crash.
-- **Fakes over `MagicMock` for provider tests** — hand-written fake clients (`FakeDDGS`, `FakeTavilyClient`) make test intent explicit and catch interface drift that a loose mock would silently swallow.
-- **Cache read/write failures are isolated in a decorator, not the DAL** — `cache.py`'s `@cached_search` wraps every provider call so a corrupt cache row or failed write is logged and never fails a search that would otherwise succeed.
-- **Config errors fail fast, network errors degrade gracefully** — a missing `TAVILY_API_KEY` raises immediately at provider construction, before any network activity; a mid-search timeout on one provider is caught per-provider and the search continues with whichever providers succeeded.
-
-## Installation
+## Quickstart
 
 ```bash
 git clone https://github.com/aayush-github-564/research-assistant-cli.git
 cd research-assistant-cli
 uv sync
 uv tool install .
+cp .env.example .env   # add your API keys — see Configuration below
+research-assistant --ask "How does retrieval augmented generation work?"
 ```
 
-Copy `.env.example` to `.env` and add your Tavily API key:
-```bash
-TAVILY_API_KEY=your_api_key_here
+---
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A[User] --> B[CLI]
+
+    B --> C{Operation}
+
+    C -->|Search| D[Multi-Provider Search]
+    C -->|Ask| E[Fresh Search + RAG]
+
+    D --> F[DuckDuckGo]
+    D --> G[Tavily]
+
+    F --> H[Merge + Deduplicate]
+    G --> H
+
+    H --> I[SQLite]
+
+    I --> J[Content Ingestion]
+    J --> K[Web Page Fetch]
+    K --> L[Content Extraction]
+    L --> M[Chunking]
+    M --> N[Embedding Provider]
+
+    N --> O[Cohere]
+    N --> P[Gemini]
+
+    O --> Q[SQLite Embedding Store]
+    P --> Q
+
+    E --> R[Query Embedding]
+    R --> S[Cosine Similarity]
+    Q --> S
+
+    S --> T[Top-K Relevant Chunks]
+    T --> U[Claude]
+    U --> V[Grounded Answer + Sources]
 ```
 
-## Usage
+### Pipeline stages
+
+| Stage | What happens | Tech |
+|---|---|---|
+| Search | Queries providers concurrently; a failure in one doesn't block the other | DuckDuckGo, Tavily |
+| Ingestion | Fetches each result's page, extracts readable content, falls back to the snippet on failure | `trafilatura` |
+| Chunking | Splits content into overlapping word chunks to preserve context across boundaries | 200-word chunks, 40-word overlap |
+| Embedding | Converts each chunk into a dense vector behind a common provider interface | Cohere `embed-v4.0`, Gemini `text-embedding-005` |
+| Storage | Persists chunk text, source metadata, and the embedding vector; tags vectors by originating model so different embedding spaces are never compared | SQLite BLOBs (NumPy `float32`) |
+| Retrieval | Embeds the query, computes cosine similarity against same-provider vectors, returns top-K | NumPy |
+| Synthesis | Answers using only retrieved context, cites source URLs, and is instructed to say when context is insufficient | Claude |
+
+<!-- Screenshot: `research-assistant --ask "..."` output showing the
+     question, generated answer, and cited source URLs -->
+![RAG answer generation](result-screenshots/main_output.png)
+![RAG answer generation](result-screenshots/main_output2.png)
+![RAG answer generation](result-screenshots/--ask_output.png)
+![RAG answer generation](result-screenshots/--ask_output2.png)
+
+---
+
+## Evaluation & Benchmarks
+
+*(as of Sep 2026 — verified against the current codebase)*
+
+| Metric | Result |
+|---|---:|
+| Source-level Recall@5 | **80%** (20 manually curated queries, one designated relevant source each) |
+| Indexed chunks | **6,760+** |
+| Research topics | **74** |
+| Search resilience | **38/38** simulated single-provider failure scenarios handled |
+| Search deduplication | 400 → 362 unique results (~9.5% reduction) |
+| Cache speedup | ~3,130 ms cold → ~0.4 ms warm (~7,800×) |
+| Tests | **56/56** passing — ~74% overall coverage, ~96% on core modules |
+
+The recall figure is a project-level retrieval benchmark, not a general corpus-wide IR benchmark: each query has one manually designated relevant source, and a query counts as a hit if that source appears in the top 5 unique sources retrieved. Evaluation scripts live in `scripts/` (`measure_recall.py`, `measure_scale.py`, `measure_cache.py`, `measure_dedup.py`, `measure_resilience.py`).
+
+---
+
+## Project Structure
+
+```text
+research-assistant-cli/
+├── src/research_assistant_cli/
+│   ├── main.py           # CLI entry point and command dispatch
+│   ├── providers.py      # DuckDuckGo/Tavily search providers
+│   ├── resilience.py     # Retry + exponential backoff
+│   ├── cache.py          # SQLite-backed search caching
+│   ├── database.py       # Thread-safe SQLite persistence layer
+│   ├── content.py        # Web fetching + content extraction + chunking
+│   ├── ingestion.py      # Chunking, embedding, and vector persistence
+│   ├── embeddings.py     # Cohere/Gemini embedding abstraction
+│   ├── retrieval.py      # NumPy cosine-similarity retrieval
+│   ├── synthesis.py      # Claude-based answer synthesis
+│   ├── models.py         # Search result data models
+│   ├── paths.py          # Cross-platform application paths
+│   └── logger.py         # Console + file logging
+├── scripts/               # Evaluation/benchmark scripts (see above)
+├── tests/                  # Automated test suite
+├── .github/workflows/       # CI configuration
+├── pyproject.toml
+├── uv.lock
+└── README.md
+```
+
+---
+
+## Key Design Decisions
+
+**No LangChain or managed vector database.** Chunking, embedding, vector storage, similarity search, context assembly, and synthesis are implemented explicitly rather than abstracted away, to keep the retrieval pipeline transparent and directly controllable.
+
+**SQLite for everything.** Zero external DB setup, local persistence, transactions, and a simple deployment model — sufficient for the current research corpus, and it stores both structured research data and serialized embedding vectors.
+
+**NumPy for vector retrieval.** The corpus is small enough that an in-memory cosine similarity calculation is simple and transparent: load compatible embeddings, build a matrix, score, sort, return top-K. For significantly larger corpora, this could be extended to an ANN index like HNSW or a dedicated vector DB.
+
+**Multiple embedding providers.** Isolated behind an abstract `EmbeddingProvider` interface (`CohereEmbeddingProvider`, `GeminiEmbeddingProvider`) so the retrieval layer isn't coupled to one vendor. Vectors are tagged with their originating model, and retrieval excludes vectors from a different provider.
+
+---
+
+## Configuration
+
+```env
+TAVILY_API_KEY=your_tavily_api_key
+
+COHERE_API_KEY=your_cohere_api_key
+GEMINI_API_KEY=your_gemini_api_key
+
+ANTHROPIC_API_KEY=your_anthropic_api_key
+
+EMBEDDING_PROVIDER=cohere   # or: gemini
+```
+
+**Requirements:** Python 3.13+, `uv`, and API keys for the providers you want to use.
+
+---
+
+## Commands
 
 ```bash
-# Run a search (query is a positional argument, no subcommand)
-research-assistant "your query here"
+# Search the web — queries providers, merges/dedupes, saves and embeds results
+research-assistant "retrieval augmented generation"
 
-# View a past search's results by ID
-research-assistant --show <id>
+# Ask a research question — fresh search, embed, retrieve, synthesize an answer with sources
+research-assistant --ask "How does retrieval augmented generation work?"
 
-# List the 5 most recent searches
+# View recent searches
 research-assistant --history
 
-# Find past searches matching a keyword
-research-assistant --find "keyword"
+# View a previous search
+research-assistant --show <id>
+
+# Search previous research
+research-assistant --find "embeddings"
 ```
+
+---
 
 ## Testing
 
 ```bash
 uv run pytest
+uv run pytest --cov=src/research_assistant_cli --cov-report=term-missing
 ```
 
-**32 tests passing, 99% coverage** (491 statements, 7 missed) across `cache.py`, `database.py`, `models.py`, `paths.py`, `providers.py`, and `resilience.py`. Test suite covers dataclass equality/repr, retry/backoff exhaustion and non-matching-exception paths, cache hit/miss/expiry/read-write-failure handling, cross-platform path resolution (Windows/macOS/Linux), and provider success/failure/merge/dedup logic. CI runs the full suite via GitHub Actions on every push and pull request to `main`.
+56/56 tests passing (~74% overall coverage, ~96% on core application modules — the CLI entry point pulls the overall number down). GitHub Actions runs the suite on repository changes.
 
-```bash
-uv run pytest --cov=. --cov-report=term-missing
-```
+---
 
-**Coverage report:**
+## Technology Stack
 
-![Test coverage report](research-assistant-cli_test-coverage.png)
+- **AI/ML** — RAG, text embeddings, semantic search, cosine similarity, Cohere Embed, Gemini Embeddings, Anthropic Claude
+- **Backend/Data** — Python, SQLite, NumPy, REST APIs, concurrent provider execution, transactional persistence
+- **Search & Ingestion** — DuckDuckGo, Tavily, Requests, Trafilatura
+- **Engineering** — pytest, pytest-cov, GitHub Actions, `uv`, Hatchling, `.env` configuration
 
-## Known limitations / next steps
+---
 
-- `shutdown_event` mid-save rollback path in `database.py` (lines 105–107, 117–119) is currently untested — the one gap in an otherwise 99%-covered codebase
-- `DEFAULT_CACHE_TTL` in `cache.py` is currently set to `5` (seconds) with a stale comment claiming "1 hour" — needs correcting to an intentional value before this is production-shaped
-- Third-party `ddgs` library logs at INFO level and floods the console/log file since `logger.py` only calls `logging.basicConfig()` without suppressing dependency loggers — needs `logging.getLogger("ddgs").setLevel(logging.WARNING)` (and its HTTP client) added to `setup_logging()`
-- No `--help` or argument validation beyond manual `sys.argv` checks — a real argparse/click-based interface is a natural follow-up
-- Phase 8 (embeddings-based semantic query + LLM-summarized answers) is the next milestone
+## Current Limitations
 
-## What this project demonstrates
+- Vector retrieval is exact similarity search — no ANN index (HNSW) or dedicated vector database
+- Retrieval evaluation uses a manually curated benchmark, one designated relevant source per query, rather than a large public IR dataset
+- LLM synthesis depends on retrieved context and doesn't independently verify claims against the web
+- CLI is intentionally lightweight — no interactive UI yet
 
-Built end-to-end in Python as a deliberate transition project (prior background: Java/Spring Boot), covering: resilient network programming, thread-safe local persistence, a real automated test suite (not just happy-path), CI/CD, and packaging — the full lifecycle of a production-shaped CLI tool, not a tutorial script.
+## Future Improvements
+
+- [ ] Hybrid keyword + vector retrieval
+- [ ] HNSW / approximate nearest-neighbor indexing
+- [ ] Reranking retrieved chunks
+- [ ] Larger automated retrieval evaluation set
+- [ ] Streaming LLM responses
+- [ ] Web UI for research sessions
+- [ ] Evaluation of answer faithfulness and citation accuracy
+
+---
+
+## What This Project Demonstrates
+
+**AI Engineering** — RAG pipeline design, embedding generation, semantic retrieval, vector similarity search, LLM grounding, retrieval evaluation, provider abstraction
+
+**Software Engineering** — modular architecture, concurrent execution, thread-safe persistence, transactional DB operations, retry/backoff, caching, automated testing, CI/CD, CLI packaging
+
+> **Build the AI pipeline explicitly, measure it, and keep the underlying system modular enough to evolve.**
+
+---
+
+## License
+
+MIT License. See `LICENSE` for details.
